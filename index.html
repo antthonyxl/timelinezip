@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Metas Diárias • Semana</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+
+<body data-mode="home" data-auth="out">
+<header>
+  <div class="wrap">
+    <div class="topbar">
+      <div class="brand">
+        <div class="logo"></div>
+        <div>
+          <h1>Metas Diárias • Semana</h1>
+          <div class="muted">Agora com Supabase (multiusuário) • tudo salvo no banco</div>
+        </div>
+      </div>
+
+      <div class="topActions" id="authActions">
+        <!-- Quando logado -->
+        <div class="authBar" id="authBar" style="display:none;">
+          <span class="pill" id="userPill">—</span>
+
+          <select id="workspaceSelect" class="select"></select>
+
+          
+
+          <button class="btn" id="btnInvites">
+            Convites <span id="invitesBadge" class="badge" style="display:none;">0</span>
+          </button>
+          <button class="btn" id="btnMembers">Membros</button>
+          <button class="btn primary" id="btnInviteUser" title="Convidar pessoa por email">+ Convidar</button>
+<button class="btn ok" id="btnCreateWorkspace">+ Criar grupo</button>
+          <button class="btn" id="btnRefresh">Recarregar</button>
+          <button class="btn" id="btnLogout">Sair</button>
+        </div>
+
+        <!-- Quando deslogado -->
+        <div class="authBar" id="authBarOut">
+          <span class="pill warn">Faça login para acessar as metas</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <!-- AUTH CARD -->
+  <section class="card" id="authCard">
+    <div class="head">
+      <div>
+        <h2>Acessar</h2>
+        <div class="muted">Entre com email/senha (Supabase). Depois escolha/crie um grupo.</div>
+      </div>
+      <span class="pill">Login</span>
+    </div>
+
+    <div class="body">
+      <div class="row">
+        <div>
+          <label>Email</label>
+          <input id="authEmail" placeholder="seuemail@exemplo.com" />
+        </div>
+        <div>
+          <label>Senha</label>
+          <input id="authPass" type="password" placeholder="••••••••" />
+        </div>
+      </div>
+
+      <div class="modalActions" style="margin-top:10px;">
+        <button class="btn" id="btnSignIn">Entrar</button>
+        <button class="btn primary" id="btnSignUp">Criar conta</button>
+      </div>
+
+      <div class="hint" id="authMsg" style="margin-top:10px;"></div>
+    </div>
+  </section>
+
+  <div class="grid">
+
+    <!-- HOME: Lista de metas -->
+    <section class="card" id="homeCard">
+      <div class="head">
+        <div>
+          <h2>Suas metas semanais</h2>
+          <div class="muted">Use “Visualizar” para controlar metas batidas e pontuação.</div>
+        </div>
+        <span class="pill" id="countPill">0 meta(s)</span>
+      </div>
+
+      <div class="body">
+        <div class="topActions" style="margin-bottom:10px;">
+          <button class="btn" id="btnReset">Limpar cache local</button>
+          <button class="btn primary" id="btnNew">+ Nova meta semanal</button>
+        </div>
+
+        <div class="list" id="goalsList"></div>
+
+        <div id="homeEmpty" class="empty" style="display:none;">
+          Nenhuma meta criada ainda.<br/>
+          Clique em <b>“Nova meta semanal”</b> para começar.
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW: Detalhes / Controle -->
+    <section class="card rightCard" id="viewCard">
+      <div class="head">
+        <div>
+          <h2>Detalhes da meta</h2>
+          <div class="muted">Controle metas fixas e adicionais por dia.</div>
+        </div>
+        <span class="pill" id="viewPill">Nenhuma selecionada</span>
+      </div>
+
+      <div class="body">
+        <div id="viewEmpty" class="empty">
+          Clique em <b>“Visualizar”</b> em alguma meta para fazer o controle.
+        </div>
+
+        <div id="viewContent" style="display:none;">
+          <div class="viewHeader">
+            <div>
+              <div class="viewTitle" id="viewTitle"></div>
+              <div class="muted" id="viewWeek"></div>
+              <div class="muted" style="margin-top:6px;" id="viewReward"></div>
+            </div>
+
+            <div class="viewActions">
+              <button class="btn" id="btnBack">← Voltar</button>
+              <button class="btn" id="btnEditFromView">Editar</button>
+              <button class="btn danger" id="btnDelete">Excluir</button>
+            </div>
+          </div>
+
+          <div class="summary" id="summary"></div>
+
+          <div class="divider"></div>
+
+          <div class="tabs" id="dayTabs"></div>
+
+          <div style="margin-top:10px;">
+            <div class="muted" id="dayLabel"></div>
+
+            <div class="divider"></div>
+
+            <div>
+              <div class="between">
+                <div class="muted">Metas fixas</div>
+                <button class="btn ok" id="btnAddFixed">+ Adicionar</button>
+              </div>
+
+              <div class="taskList" id="fixedList"></div>
+
+              <div class="hint" style="margin-top:6px;">
+                Dica: clique no lápis para editar o texto; salve ou cancele.
+              </div>
+            </div>
+
+            <div class="divider"></div>
+
+            <div>
+              <div class="between">
+                <div class="muted">Metas adicionais</div>
+                <button class="btn ok" id="btnAddTask">+ Adicionar</button>
+              </div>
+              <div class="taskList" id="extraList"></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+  </div>
+</main>
+
+<!-- MODAL: Criar / Editar meta -->
+<div class="modalBg" id="modalBg">
+  <div class="modal">
+    <div class="head">
+      <div class="modalTitle" id="modalTitle">Nova meta semanal</div>
+      <button class="btn" id="btnCloseModal">Fechar</button>
+    </div>
+
+    <div class="body">
+      <label>Nome da meta semanal</label>
+      <input id="inpName" placeholder="Ex: Fevereiro Semana 1 / Estudos / Academia..." />
+
+      <div class="row">
+        <div>
+          <label>Semana (início na segunda-feira)</label>
+          <input id="inpWeekStart" type="date" />
+          <div class="hint">Se escolher uma data que não seja segunda, ajusto automaticamente.</div>
+        </div>
+
+        <div>
+          <label>Pontos mínimos para liberar a premiação</label>
+          <input id="inpMinPoints" type="number" min="0" step="1" placeholder="Ex: 10" />
+          <div class="hint">Premiação libera quando pontos obtidos na semana forem ≥ mínimo.</div>
+        </div>
+      </div>
+
+      <label>Premiação semanal</label>
+      <input id="inpReward" placeholder="Ex: Pizza domingo / Comprar algo / Folga..." />
+
+      <div class="divider"></div>
+
+      <div class="row">
+        <div>
+          <label>Quantas metas fixas por dia? (apenas ao criar)</label>
+          <input id="inpFixedPerDay" type="number" min="0" step="1" value="2" />
+          <div class="hint">Crio tarefas fixas repetidas em cada dia (você edita depois).</div>
+        </div>
+
+        <div>
+          <label>Pontos padrão por tarefa fixa (apenas ao criar)</label>
+          <input id="inpDefaultPoints" type="number" min="0" step="1" value="1" />
+          <div class="hint">Você pode alterar os pontos dentro da meta.</div>
+        </div>
+      </div>
+
+      <div class="modalActions">
+        <button class="btn" id="btnCancel">Cancelar</button>
+        <button class="btn primary" id="btnSave">Salvar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- MODAL: Convites -->
+<div class="modalBg" id="invitesModalBg">
+  <div class="modal">
+    <div class="head">
+      <div class="modalTitle">Convites pendentes</div>
+      <button class="btn" id="btnCloseInvitesModal">Fechar</button>
+    </div>
+    <div class="body">
+      <div id="invitesModalList" class="list"></div>
+      <div class="modalActions">
+        <button class="btn" id="btnCloseInvitesModal2">Fechar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Membros do grupo -->
+<div class="modalBg" id="membersModalBg">
+  <div class="modal">
+    <div class="head">
+      <div class="modalTitle">Membros do grupo</div>
+      <button class="btn" id="btnCloseMembersModal">Fechar</button>
+    </div>
+    <div class="body">
+      <div class="between" style="margin-bottom:10px;">
+        <div class="muted" id="membersRolePill">—</div>
+        <button class="btn primary" id="btnInviteFromMembers" title="Convidar por email">+ Convidar</button>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="muted" style="margin-bottom:8px;">Membros</div>
+      <div id="membersList" class="list"></div>
+
+      <div class="divider"></div>
+
+      <div class="muted" style="margin-bottom:8px;">Convites pendentes</div>
+      <div id="pendingInvitesList" class="list"></div>
+
+      <div class="modalActions">
+        <button class="btn" id="btnCloseMembersModal2">Fechar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Supabase CDN -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="app.js"></script>
+</body>
+</html>
