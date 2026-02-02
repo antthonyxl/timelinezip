@@ -1034,16 +1034,16 @@
     let label, pillText, pillClass;
 
     if (reached) {
-      label = "LIBERADA";
-      pillText = "Premiação liberada ✅";
+      label = "META CONCLUÍDA";
+      pillText = "Meta concluída ✅";
       pillClass = "ok";
     } else if (ended) {
-      label = "NÃO LIBERADA";
-      pillText = "Premiação não liberada ❌";
+      label = "META NÃO CONCLUÍDA";
+      pillText = "Meta não concluída ❌";
       pillClass = "bad";
     } else {
       label = "EM ANDAMENTO";
-      pillText = "Premiação pendente ⏳";
+      pillText = "Meta pendente ⏳";
       pillClass = "warn";
     }
 
@@ -1141,7 +1141,7 @@
 
     const stats = computeStats(g);
     const rewardInfo = computeRewardStatus(g, stats);
-    viewReward.innerHTML = `Premiação: <b>${escapeHtml(
+    viewReward.innerHTML = `Planejamento: <b>${escapeHtml(
       g.reward || "—"
     )}</b> • Status: <b>${rewardInfo.label}</b>`;
 
