@@ -7,19 +7,7 @@
   const SUPABASE_URL = "https://nuzpvkwkwksoqiggmymr.supabase.co";
   const SUPABASE_KEY = "sb_publishable_BqrMS126Z0iRSCobPYN1uw_-t5gUi0L";
 
-  const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
-    auth: {
-      persistSession: true,
-      autoRefreshToken: true,
-      detectSessionInUrl: true,
-      flowType: "pkce",
-      // Evita conflito de sessão (GoTrue) em GitHub Pages / github.io
-      storageKey: "metas-semana-auth",
-    },
-  });
-
-  // Debug (opcional): permite testar no console do Pages sem criar outro client
-  window.__sb = supabase;
+  const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
   // =========================
   // Consts / Helpers
@@ -137,6 +125,25 @@
   const inpReward = $("#inpReward");
   const inpFixedPerDay = $("#inpFixedPerDay");
   const inpDefaultPoints = $("#inpDefaultPoints");
+
+  // Convites / Membros
+  const btnInvites = $("#btnInvites");
+  const invitesBadge = $("#invitesBadge");
+  const btnInviteUser = $("#btnInviteUser");
+  const btnMembers = $("#btnMembers");
+
+  const invitesModalBg = $("#invitesModalBg");
+  const invitesModalList = $("#invitesModalList");
+  const btnCloseInvitesModal = $("#btnCloseInvitesModal");
+  const btnCloseInvitesModal2 = $("#btnCloseInvitesModal2");
+
+  const membersModalBg = $("#membersModalBg");
+  const membersList = $("#membersList");
+  const pendingInvitesList = $("#pendingInvitesList");
+  const membersRolePill = $("#membersRolePill");
+  const btnInviteFromMembers = $("#btnInviteFromMembers");
+  const btnCloseMembersModal = $("#btnCloseMembersModal");
+  const btnCloseMembersModal2 = $("#btnCloseMembersModal2");
 
   // =========================
   // Realtime (NEW)
@@ -276,6 +283,416 @@
   }
 
   // =========================
+  // Roles / Permissions + Convites + Membros
+  // =========================
+  let myRole = "member"; // owner | admin | member
+  let cachedInvites = [];
+  let cachedMembers = [];
+  let cachedPendingInvites = [];
+
+  function isOwner() {
+    return myRole === "owner";
+  }
+  function isAdmin() {
+    return myRole === "owner" || myRole === "admin";
+  }
+
+  async function fetchMyRole() {
+    if (!state.user || !state.workspaceId) {
+      myRole = "member";
+      return myRole;
+    }
+    const { data, error } = await supabase
+      .from("workspace_members")
+      .select("role")
+      .eq("workspace_id", state.workspaceId)
+      .eq("user_id", state.user.id)
+      .maybeSingle();
+    if (error) throw error;
+    myRole = data?.role || "member";
+    membersRolePill.textContent = `Seu papel: ${myRole}`;
+    // botões visuais
+    btnInviteUser.style.display = isAdmin() ? "inline-flex" : "none";
+    btnInviteFromMembers.style.display = isAdmin() ? "inline-flex" : "none";
+    return myRole;
+  }
+
+  function updateInvitesBadge() {
+    const n = cachedInvites.length;
+    invitesBadge.textContent = String(n);
+    invitesBadge.style.display = n > 0 ? "inline-flex" : "none";
+  }
+
+  async function loadMyInvites() {
+    if (!state.user) return;
+    const myEmail = (state.user.email || "").trim().toLowerCase();
+
+    const { data, error } = await supabase
+      .from("workspace_invites")
+      .select("id, workspace_id, invited_email, status, created_at, workspaces(name)")
+      .eq("status", "pending")
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+
+    cachedInvites = (data || []).filter(
+      (i) => (i.invited_email || "").trim().toLowerCase() === myEmail
+    );
+
+    updateInvitesBadge();
+  }
+
+  function openInvitesModal() {
+    renderInvitesModal();
+    invitesModalBg.style.display = "flex";
+  }
+  function closeInvitesModal() {
+    invitesModalBg.style.display = "none";
+  }
+
+  function renderInvitesModal() {
+    invitesModalList.innerHTML = "";
+
+    if (!cachedInvites.length) {
+      const div = document.createElement("div");
+      div.className = "empty";
+      div.textContent = "Nenhum convite pendente.";
+      invitesModalList.appendChild(div);
+      return;
+    }
+
+    for (const inv of cachedInvites) {
+      const item = document.createElement("div");
+      item.className = "itemCard";
+
+      const groupName = inv.workspaces?.name || "Grupo";
+
+      item.innerHTML = `
+        <div class="itemInfo">
+          <div class="itemTitle">${escapeHtml(groupName)}</div>
+          <div class="itemMeta">Você foi convidado com: <b>${escapeHtml(inv.invited_email)}</b></div>
+        </div>
+        <div class="itemActions">
+          <button class="btn ok" data-accept="${escapeAttr(inv.id)}">Aceitar</button>
+          <button class="btn danger" data-decline="${escapeAttr(inv.id)}">Recusar</button>
+        </div>
+      `;
+
+      invitesModalList.appendChild(item);
+    }
+
+    invitesModalList.querySelectorAll("[data-accept]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const id = btn.getAttribute("data-accept");
+        const inv = cachedInvites.find((x) => x.id === id);
+        if (!inv) return;
+        await acceptInvite(inv);
+      });
+    });
+
+    invitesModalList.querySelectorAll("[data-decline]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const id = btn.getAttribute("data-decline");
+        const inv = cachedInvites.find((x) => x.id === id);
+        if (!inv) return;
+        await declineInvite(inv);
+      });
+    });
+  }
+
+  async function acceptInvite(inv) {
+    try {
+      // 1) cria membership (entra no grupo)
+      const { error: memErr } = await supabase.from("workspace_members").insert([
+        {
+          workspace_id: inv.workspace_id,
+          user_id: state.user.id,
+          user_email: (state.user.email || "").trim().toLowerCase(),
+          role: "member",
+        },
+      ]);
+      if (memErr) throw memErr;
+
+      // 2) marca convite como accepted
+      const { error: upErr } = await supabase
+        .from("workspace_invites")
+        .update({
+          status: "accepted",
+          invited_user_id: state.user.id,
+          accepted_at: new Date().toISOString(),
+        })
+        .eq("id", inv.id);
+      if (upErr) throw upErr;
+
+      cachedInvites = cachedInvites.filter((x) => x.id !== inv.id);
+      updateInvitesBadge();
+      renderInvitesModal();
+
+      alert("Convite aceito! Você entrou no grupo.");
+      await refreshWorkspaceList(inv.workspace_id);
+      closeInvitesModal();
+    } catch (err) {
+      alert("Erro ao aceitar convite: " + (err?.message || err));
+      console.error(err);
+    }
+  }
+
+  async function declineInvite(inv) {
+    try {
+      const { error } = await supabase
+        .from("workspace_invites")
+        .update({ status: "revoked" })
+        .eq("id", inv.id);
+      if (error) throw error;
+
+      cachedInvites = cachedInvites.filter((x) => x.id !== inv.id);
+      updateInvitesBadge();
+      renderInvitesModal();
+    } catch (err) {
+      alert("Erro ao recusar convite: " + (err?.message || err));
+      console.error(err);
+    }
+  }
+
+  async function inviteUserPrompt() {
+    if (!state.workspaceId) return alert("Selecione um grupo primeiro.");
+    await fetchMyRole();
+    if (!isAdmin()) return alert("Apenas owner/admin pode convidar pessoas neste grupo.");
+
+    const email = prompt("Digite o email da pessoa para convidar:");
+    if (!email) return;
+
+    try {
+      const { error } = await supabase.from("workspace_invites").insert([
+        {
+          workspace_id: state.workspaceId,
+          invited_email: email.trim().toLowerCase(),
+          invited_by: state.user.id,
+          status: "pending",
+        },
+      ]);
+      if (error) throw error;
+
+      alert("Convite criado! A pessoa precisa logar e aceitar em “Convites”.");
+      // se estiver no modal de membros, refresca pendentes
+      await loadMembersAndInvites();
+      renderMembersModal();
+    } catch (err) {
+      alert("Erro ao convidar: " + (err?.message || err));
+      console.error(err);
+    }
+  }
+
+  function openMembersModal() {
+    renderMembersModal();
+    membersModalBg.style.display = "flex";
+  }
+  function closeMembersModal() {
+    membersModalBg.style.display = "none";
+  }
+
+  async function loadMembersAndInvites() {
+    if (!state.workspaceId) return;
+
+    await fetchMyRole();
+
+    // membros do workspace
+    const { data: mem, error: memErr } = await supabase
+      .from("workspace_members")
+      .select("user_id, user_email, role, created_at")
+      .eq("workspace_id", state.workspaceId)
+      .order("created_at", { ascending: true });
+
+    if (memErr) throw memErr;
+    cachedMembers = mem || [];
+
+    // convites pendentes do workspace (apenas owner/admin deve conseguir pelo RLS)
+    const { data: inv, error: invErr } = await supabase
+      .from("workspace_invites")
+      .select("id, invited_email, status, created_at")
+      .eq("workspace_id", state.workspaceId)
+      .eq("status", "pending")
+      .order("created_at", { ascending: false });
+
+    // se não tiver permissão, só mostra vazio (sem quebrar)
+    cachedPendingInvites = invErr ? [] : inv || [];
+  }
+
+  function renderMembersModal() {
+    // role pill atualiza no fetchMyRole
+    membersList.innerHTML = "";
+    pendingInvitesList.innerHTML = "";
+
+    if (!state.workspaceId) {
+      membersList.innerHTML = `<div class="empty">Selecione um grupo primeiro.</div>`;
+      pendingInvitesList.innerHTML = `<div class="empty">Selecione um grupo primeiro.</div>`;
+      return;
+    }
+
+    // Membros
+    if (!cachedMembers.length) {
+      membersList.innerHTML = `<div class="empty">Nenhum membro encontrado.</div>`;
+    } else {
+      for (const m of cachedMembers) {
+        const isMe = m.user_id === state.user?.id;
+        const title = m.user_email || m.user_id;
+        const sub = `Papel: ${m.role}${isMe ? " • (você)" : ""}`;
+
+        const item = document.createElement("div");
+        item.className = "itemCard";
+
+        const canManageThisRow =
+          isOwner() && !isMe && m.role !== "owner"; // owner gerencia outros; não mexe no owner
+        const roleSelectHtml = canManageThisRow
+          ? `<select class="selectSmall" data-role-user="${escapeAttr(m.user_id)}">
+              <option value="member" ${m.role === "member" ? "selected" : ""}>member</option>
+              <option value="admin" ${m.role === "admin" ? "selected" : ""}>admin</option>
+            </select>
+            <button class="btn ok" data-save-role="${escapeAttr(m.user_id)}">Salvar</button>`
+          : `<span class="pill ${m.role === "owner" ? "ok" : m.role === "admin" ? "warn" : ""}">${escapeHtml(m.role)}</span>`;
+
+        const removeBtnHtml = canManageThisRow
+          ? `<button class="btn danger" data-remove-user="${escapeAttr(m.user_id)}">Remover</button>`
+          : "";
+
+        item.innerHTML = `
+          <div class="itemInfo">
+            <div class="itemTitle">${escapeHtml(title)}</div>
+            <div class="itemMeta">${escapeHtml(sub)}</div>
+          </div>
+          <div class="itemActions">
+            ${roleSelectHtml}
+            ${removeBtnHtml}
+          </div>
+        `;
+
+        membersList.appendChild(item);
+      }
+
+      // bind role save
+      membersList.querySelectorAll("[data-save-role]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const userId = btn.getAttribute("data-save-role");
+          const sel = membersList.querySelector(
+            `[data-role-user="${CSS.escape(userId)}"]`
+          );
+          const newRole = sel?.value || "member";
+          await updateMemberRole(userId, newRole);
+        });
+      });
+
+      // bind remove
+      membersList.querySelectorAll("[data-remove-user]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const userId = btn.getAttribute("data-remove-user");
+          const ok = confirm("Remover este usuário do grupo?");
+          if (!ok) return;
+          await removeMember(userId);
+        });
+      });
+    }
+
+    // Convites pendentes
+    if (!cachedPendingInvites.length) {
+      pendingInvitesList.innerHTML = `<div class="empty">${
+        isAdmin()
+          ? "Nenhum convite pendente."
+          : "Apenas owner/admin vê convites pendentes deste grupo."
+      }</div>`;
+    } else {
+      for (const inv of cachedPendingInvites) {
+        const item = document.createElement("div");
+        item.className = "itemCard";
+        item.innerHTML = `
+          <div class="itemInfo">
+            <div class="itemTitle">${escapeHtml(inv.invited_email)}</div>
+            <div class="itemMeta">Status: pending</div>
+          </div>
+          <div class="itemActions">
+            ${
+              isAdmin()
+                ? `<button class="btn warn" data-revoke-invite="${escapeAttr(inv.id)}">Revogar</button>`
+                : ""
+            }
+          </div>
+        `;
+        pendingInvitesList.appendChild(item);
+      }
+
+      pendingInvitesList.querySelectorAll("[data-revoke-invite]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const id = btn.getAttribute("data-revoke-invite");
+          const ok = confirm("Revogar este convite?");
+          if (!ok) return;
+          await revokeInvite(id);
+        });
+      });
+    }
+  }
+
+  async function updateMemberRole(userId, newRole) {
+    try {
+      await fetchMyRole();
+      if (!isOwner()) return alert("Apenas o owner pode alterar roles.");
+
+      const { error } = await supabase
+        .from("workspace_members")
+        .update({ role: newRole })
+        .eq("workspace_id", state.workspaceId)
+        .eq("user_id", userId);
+
+      if (error) throw error;
+
+      await loadMembersAndInvites();
+      renderMembersModal();
+    } catch (err) {
+      alert("Erro ao atualizar role: " + (err?.message || err));
+      console.error(err);
+    }
+  }
+
+  async function removeMember(userId) {
+    try {
+      await fetchMyRole();
+      if (!isOwner()) return alert("Apenas o owner pode remover membros.");
+
+      const { error } = await supabase
+        .from("workspace_members")
+        .delete()
+        .eq("workspace_id", state.workspaceId)
+        .eq("user_id", userId);
+
+      if (error) throw error;
+
+      await loadMembersAndInvites();
+      renderMembersModal();
+    } catch (err) {
+      alert("Erro ao remover membro: " + (err?.message || err));
+      console.error(err);
+    }
+  }
+
+  async function revokeInvite(inviteId) {
+    try {
+      await fetchMyRole();
+      if (!isAdmin()) return alert("Apenas owner/admin pode revogar convites.");
+
+      const { error } = await supabase
+        .from("workspace_invites")
+        .update({ status: "revoked" })
+        .eq("id", inviteId);
+
+      if (error) throw error;
+
+      await loadMembersAndInvites();
+      renderMembersModal();
+    } catch (err) {
+      alert("Erro ao revogar convite: " + (err?.message || err));
+      console.error(err);
+    }
+  }
+
+  // =========================
   // Supabase - Workspace
   // =========================
   async function loadWorkspaces() {
@@ -317,7 +734,7 @@
 
       const { error: memErr } = await supabase
         .from("workspace_members")
-        .insert([{ workspace_id: ws.id, user_id: state.user.id, role: "owner" }]);
+        .insert([{ workspace_id: ws.id, user_id: state.user.id, user_email: (state.user.email||"").trim().toLowerCase(), role: "owner" }]);
 
       if (memErr) throw memErr;
 
@@ -366,6 +783,10 @@
 
     await fetchAllGoals();
     startRealtime(); // NEW
+
+    // atualiza permissões e convites
+    await fetchMyRole();
+    await loadMyInvites();
   }
 
   // =========================
@@ -1109,6 +1530,36 @@
   $("#btnCreateWorkspace").addEventListener("click", createWorkspace);
   $("#btnRefresh").addEventListener("click", fetchAllGoals);
 
+  // Convites / Membros
+  btnInvites.addEventListener("click", async () => {
+    await loadMyInvites();
+    openInvitesModal();
+  });
+  btnInviteUser.addEventListener("click", inviteUserPrompt);
+  btnMembers.addEventListener("click", async () => {
+    try {
+      await loadMembersAndInvites();
+      openMembersModal();
+    } catch (err) {
+      alert("Erro ao carregar membros: " + (err?.message || err));
+      console.error(err);
+    }
+  });
+
+  btnInviteFromMembers.addEventListener("click", inviteUserPrompt);
+
+  btnCloseInvitesModal.addEventListener("click", closeInvitesModal);
+  btnCloseInvitesModal2.addEventListener("click", closeInvitesModal);
+  invitesModalBg.addEventListener("click", (e) => {
+    if (e.target === invitesModalBg) closeInvitesModal();
+  });
+
+  btnCloseMembersModal.addEventListener("click", closeMembersModal);
+  btnCloseMembersModal2.addEventListener("click", closeMembersModal);
+  membersModalBg.addEventListener("click", (e) => {
+    if (e.target === membersModalBg) closeMembersModal();
+  });
+
   workspaceSelect.addEventListener("change", async () => {
     const id = workspaceSelect.value;
     state.workspaceId = id || null;
@@ -1117,6 +1568,8 @@
     stopRealtime(); // NEW (evita canal antigo)
     await fetchAllGoals();
     startRealtime(); // NEW
+    await fetchMyRole();
+    await loadMyInvites();
     closeGoal();
   });
 
