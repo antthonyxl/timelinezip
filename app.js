@@ -226,6 +226,70 @@
         console.log("[RT] status:", status);
       });
   }
+  // =========================
+  // Realtime: Workspaces / Membros / Convites (lista de grupos em tempo real)
+  // =========================
+  let rtWsChannel = null;
+  let rtWsTimer = null;
+
+  function stopRealtimeWorkspaces() {
+    if (rtWsTimer) {
+      clearTimeout(rtWsTimer);
+      rtWsTimer = null;
+    }
+
+    if (rtWsChannel) {
+      supabase.removeChannel(rtWsChannel);
+      rtWsChannel = null;
+    }
+  }
+
+  function scheduleWorkspaceRefresh() {
+    // debounce: evita flood de renders
+    if (rtWsTimer) clearTimeout(rtWsTimer);
+    rtWsTimer = setTimeout(async () => {
+      rtWsTimer = null;
+
+      const keepSelected = state.workspaceId;
+      try {
+        await refreshWorkspaceList(keepSelected);
+        await loadMyInvites();
+      } catch (err) {
+        console.warn("Erro ao atualizar lista de grupos em realtime:", err);
+      }
+    }, 300);
+  }
+
+  function startRealtimeWorkspaces() {
+    stopRealtimeWorkspaces();
+    if (!state.user) return;
+
+    rtWsChannel = supabase
+      .channel(`rt-user-${state.user.id}`)
+
+      // memberships do usuário: entrou/saiu de grupos
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "workspace_members",
+          filter: `user_id=eq.${state.user.id}`,
+        },
+        () => scheduleWorkspaceRefresh()
+      )
+
+      // convites (a tabela pode não ter user_id; então escutamos geral e a UI filtra)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "workspace_invites" },
+        () => scheduleWorkspaceRefresh()
+      )
+
+      .subscribe();
+  }
+
+
 
   // =========================
   // Supabase - Auth
@@ -266,9 +330,9 @@
     await afterLogin();
   }
 
-  async function signOut() {
-    stopRealtime(); // NEW
-    await supabase.auth.signOut();
+  async function showLoggedOutUI() {
+    stopRealtime(); // metas/tarefas
+    stopRealtimeWorkspaces(); // grupos/membros/convites
 
     state.session = null;
     state.user = null;
@@ -278,8 +342,24 @@
 
     setAuth(false);
     setMode("home");
+
+    // Mostra a área de login e esconde a barra do usuário logado
+    authBar.style.display = "none";
+    authBarOut.style.display = "flex";
+
     renderHome();
     renderView();
+  }
+
+  async function signOut() {
+    // Encerra sessão no Supabase e volta para a tela de login
+    try {
+      await supabase.auth.signOut();
+    } catch (e) {
+      // Mesmo que falhe, garantimos o estado de UI deslogado
+      console.warn("Falha ao deslogar:", e);
+    }
+    await showLoggedOutUI();
   }
 
   // =========================
@@ -698,7 +778,8 @@
   async function loadWorkspaces() {
     const { data: mem, error: memErr } = await supabase
       .from("workspace_members")
-      .select("workspace_id, role")
+      .select("workspace_id, role, created_at")
+      .eq("user_id", state.user.id) // ✅ só memberships do usuário logado
       .order("created_at", { ascending: true });
 
     if (memErr) throw memErr;
@@ -715,6 +796,7 @@
     if (wsErr) throw wsErr;
 
     const map = new Map(wss.map((w) => [w.id, w]));
+    // mantém a ordem do membership (created_at) e remove eventuais nulos
     return ids.map((id) => map.get(id)).filter(Boolean);
   }
 
@@ -1513,7 +1595,8 @@
 
     try {
       await refreshWorkspaceList();
-      startRealtime(); // NEW (garantia)
+      startRealtimeWorkspaces(); // ✅ lista de grupos em tempo real
+      startRealtime(); // metas/tarefas (depende do workspace selecionado)
     } catch (err) {
       alert("Erro ao carregar grupos: " + (err?.message || err));
       console.error(err);
@@ -1610,9 +1693,7 @@
     if (state.user) {
       await afterLogin();
     } else {
-      setAuth(false);
-      authBar.style.display = "none";
-      authBarOut.style.display = "flex";
+      await showLoggedOutUI();
     }
 
     supabase.auth.onAuthStateChange(async (_event, session) => {
@@ -1622,7 +1703,7 @@
       if (state.user) {
         await afterLogin();
       } else {
-        await signOut();
+        await showLoggedOutUI();
       }
     });
   }
